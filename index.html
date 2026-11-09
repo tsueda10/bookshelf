@@ -15,6 +15,7 @@ body{margin:0;background:#f2f6f4;color:#172e27;font-family:system-ui,sans-serif}
   object-fit:contain!important;object-position:center;
 }
 #viewport canvas{display:none!important}
+#camera-preview-image{position:absolute;inset:0;width:100%;height:100%;display:block}
 [hidden]{display:none!important}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
@@ -40,6 +41,7 @@ body{margin:0;background:#f2f6f4;color:#172e27;font-family:system-ui,sans-serif}
 </div>
 <div class="camera-preview rounded-2xl bg-slate-900 text-white">
 <div id="viewport"></div>
+<canvas id="camera-preview-image" aria-label="カメラ映像" hidden></canvas>
 <div id="camera-label" class="pointer-events-none absolute inset-0 grid place-items-center text-xs text-slate-200">カメラ停止中</div>
 <div id="guide" hidden class="pointer-events-none absolute inset-x-[15%] top-[26%] h-[48%] rounded border border-emerald-300/80"></div>
 </div>
@@ -76,6 +78,7 @@ const byId = id => document.getElementById(id);
 const storageKey = 'bookshelf-note.books.v1';
 let books = [];
 let camera = 'off';
+let previewFrame = 0;
 let lookingUp = false;
 let lastScan = { isbn: '', at: 0 };
 
@@ -244,7 +247,36 @@ function cameraUI(state) {
   byId('camera-label').textContent = state === 'starting' ? 'カメラを準備中…' : 'カメラ停止中';
 }
 
+function showCameraPreview(video) {
+  const canvas = byId('camera-preview-image');
+  const context = canvas.getContext('2d', { alpha: false });
+  if (!context) return;
+  canvas.hidden = false;
+
+  function draw() {
+    previewFrame = requestAnimationFrame(draw);
+    const width = Math.round(canvas.clientWidth * window.devicePixelRatio);
+    const height = Math.round(canvas.clientHeight * window.devicePixelRatio);
+    const { videoWidth, videoHeight } = video;
+    if (!width || !height || !videoWidth || !videoHeight || video.readyState < 2) return;
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+
+    // Fit the original frame independently of the video element's CSS size.
+    const scale = Math.min(width / videoWidth, height / videoHeight);
+    const imageWidth = videoWidth * scale;
+    const imageHeight = videoHeight * scale;
+    context.fillStyle = '#0f172a';
+    context.fillRect(0, 0, width, height);
+    context.drawImage(video, (width - imageWidth) / 2, (height - imageHeight) / 2, imageWidth, imageHeight);
+  }
+
+  draw();
+}
+
 function releaseCamera() {
+  cancelAnimationFrame(previewFrame);
+  byId('camera-preview-image').hidden = true;
   const scanner = window.Quagga;
   scanner?.offDetected(onDetected);
   try { scanner?.stop(); } catch { /* Initialization may be incomplete. */ }
@@ -283,6 +315,7 @@ byId('start').addEventListener('click', async () => {
     scanner.onDetected(onDetected);
     scanner.start();
     cameraUI('on');
+    showCameraPreview(video);
     message('ISBNのバーコードを枠内に映してください。');
   } catch (error) {
     const cancelled = camera === 'cancelling';
